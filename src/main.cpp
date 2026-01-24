@@ -33,17 +33,16 @@ volatile uint8_t mux_state = 0;
 volatile uint8_t adc_state[6] = {0};
 
 
-void as_multiplexer_cycle(void);
+void adc_cycle(void);
 // cycles multiplexer every 10ms
-VirtualTimer as_multiplexer_timer(10U, adc_cycle, VirtualTimer::Type::kRepeating);
+VirtualTimer adc_cycle_timer(100U, adc_cycle, VirtualTimer::Type::kRepeating);
 
-// Analog Output Constants
-float outputmax = 2.97; // output at maximum pressure (Volts)
-float outputmin  = 0.33; // output at minimum pressure (Volts)
+// Digital Output Constants
+float outputmax = 4095*0.9; // 90% of 12-bit ADC output (counts)
+float outputmin  = 4095*0.1; // 10% of 12-bit ADC output (counts)
 float pressuremax = 1.0; // maximum value of pressure range (psi)
 float pressuremin = -1.0; // minimum value of pressure range (psi)
-float diff_pressure_min_max = 2.64; // outputmax - outputmin
-float outputreading = 0.0; // pressure reading from the sensor
+float outputreading = 0.0; // pressure reading from the sensor (counts)
 
 
 void setup() {
@@ -52,14 +51,14 @@ void setup() {
     delay(10);
   }
   airspeed_init();
-  as_multiplexer_timer.Start(millis());
+  adc_cycle_timer.Start(millis());
 }
 
 void loop() {
-  as_multiplexer_timer.Tick(millis());
+  adc_cycle_timer.Tick(millis());
   uint16_t as_data = read_airspeed_adc(); // read the data from the Airspeed ADC
-  // pressurereading = (((outpu)*())/())+
 
+  float pressure = pressure_from_counts(as_data); // convert counts to pressure
   delay(1000);
 }
 
@@ -90,6 +89,11 @@ u_int16_t read_airspeed_adc(void) {
   return data;
 }
 
+float pressure_from_counts(uint16_t counts) { // do we care if the output is a float or uint12_t?
+  float pressure = ((static_cast<float>(counts) - outputmin) * (pressuremax - pressuremin) / (outputmax - outputmin)) + pressuremin;
+  return float(pressure); // pressure (PSI)
+}
+
 enum ADCState {
   STATE_SWITCH_CHANNEL,
   STATE_READ_ADC
@@ -101,14 +105,14 @@ void adc_cycle(void) {
     mux_state = (mux_state + 1) % 6;
     adc_state = STATE_READ_ADC;
     
-    adc_timer.Interval(2U); // 2ms settle time
+    adc_timer.Interval(40U); // 40ms settle time
   } 
   else if (adc_state == STATE_READ_ADC) {
     uint8_t channel = (mux_state == 0) ? 5 : (mux_state - 1); // reads ADC
     adc_readings[channel] = read_airspeed_adc();
     adc_state = STATE_SWITCH_CHANNEL;
     
-    adc_timer.Interval(8U); // completes 10ms cycle
+    adc_timer.Interval(60U); // completes 100ms cycle
   }
 }
 
