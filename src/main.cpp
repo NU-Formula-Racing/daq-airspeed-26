@@ -9,39 +9,42 @@
 #define AS_A1 16
 #define AS_A2 17
 
-// // Multiplexer for the Airspeed ADC
-// typedef enum {
-//   ADC_AS_A1_B1,
-//   ADC_AS_A2_B2,
-//   ADC_AS_A3_B3,
-//   ADC_AS_A4_B4,
-//   ADC_AS_A5_B5,
-//   ADC_AS_A6_B6,
-// } adc_as_ch;
+// Multiplexer for the Airspeed ADC
+typedef enum {
+  ADC_AS_A1_B1,
+  ADC_AS_A2_B2,
+  ADC_AS_A3_B3,
+  ADC_AS_A4_B4,
+  ADC_AS_A5_B5,
+  ADC_AS_A6_B6,
+} adc_as_ch;
 
-// static const uint8_t mux_table[][3] = {
-//   /*A2 A1 A0*/
-//   {0, 0, 0}, // ADC_AS_A1_B1
-//   {0, 0, 1}, // ADC_AS_A2_B2
-//   {0, 1, 0}, // ADC_AS_A3_B3
-//   {0, 1, 1}, // ADC_AS_A4_B4
-//   {1, 0, 0}, // ADC_AS_A5_B5
-//   {1, 0, 1}, // ADC_AS_A6_B6
-// };
+static const uint8_t mux_table[][3] = {
+  /*A2 A1 A0*/
+  {0, 0, 0}, // ADC_AS_A1_B1
+  {0, 0, 1}, // ADC_AS_A2_B2
+  {0, 1, 0}, // ADC_AS_A3_B3
+  {0, 1, 1}, // ADC_AS_A4_B4
+  {1, 0, 0}, // ADC_AS_A5_B5
+  {1, 0, 1}, // ADC_AS_A6_B6
+};
+
 volatile uint8_t mux_state = 0; 
+volatile uint8_t adc_state[6] = {0};
+
 
 void as_multiplexer_cycle(void);
+// cycles multiplexer every 10ms
+VirtualTimer as_multiplexer_timer(10U, adc_cycle, VirtualTimer::Type::kRepeating);
 
-VirtualTimer as_multiplexer_timer(10U, as_multiplexer_cycle, VirtualTimer::Type::kRepeating);
-
-
+// Analog Output Constants
 float outputmax = 2.97; // output at maximum pressure (Volts)
 float outputmin  = 0.33; // output at minimum pressure (Volts)
 float pressuremax = 1.0; // maximum value of pressure range (psi)
 float pressuremin = -1.0; // minimum value of pressure range (psi)
+float diff_pressure_min_max = 2.64; // outputmax - outputmin
 float outputreading = 0.0; // pressure reading from the sensor
 
-u_int16_t read_airspeed_adc();
 
 void setup() {
   Serial.begin(9600);
@@ -63,7 +66,7 @@ void loop() {
 // put function definitions here:
 void airspeed_init(void) {
   // SPI initialization
-  SPI.begin(AS_SPI_SCLK,AS_SPI_MISO,,AS_SPI_CS);
+  SPI.begin(AS_SPI_SCLK, AS_SPI_MISO, MOSI_PIN, AS_SPI_CS);  // Need MOSI?
   SPI.beginTransaction(SPISettings(2000000, LSBFIRST, SPI_MODE0)); // setting up SPI for the airspeed ADC
 
   // set up the SPI pins
@@ -81,18 +84,41 @@ void airspeed_init(void) {
 
 u_int16_t read_airspeed_adc(void) {
   u_int16_t data;
-  digitalWrite(AS_SPI_CS, HIGH); // turn CS high
-  data  = SPI.transfer16(0x0000); // receive 16 bits from DoutA&B of the ADC
-  digitalWrite(AS_SPI_CS, LOW); // turn CS low
+  digitalWrite(AS_SPI_CS, LOW); // LOW to enable
+  data = SPI.transfer16(0x0000);
+  digitalWrite(AS_SPI_CS, HIGH); // HIGH to disable
   return data;
 }
 
-void as_multiplexer_cycle(void){
+enum ADCState {
+  STATE_SWITCH_CHANNEL,
+  STATE_READ_ADC
+};
 
-  GPIO_A0 = (mux_state >> 0) & 0x1;
-  GPIO_
+void adc_cycle(void) {
+  if (adc_state == STATE_SWITCH_CHANNEL) {
+    select_adc_as_ch(static_cast<adc_as_ch>(mux_state)); // switch to next MUX state
+    mux_state = (mux_state + 1) % 6;
+    adc_state = STATE_READ_ADC;
+    
+    adc_timer.Interval(2U); // 2ms settle time
+  } 
+  else if (adc_state == STATE_READ_ADC) {
+    uint8_t channel = (mux_state == 0) ? 5 : (mux_state - 1); // reads ADC
+    adc_readings[channel] = read_airspeed_adc();
+    adc_state = STATE_SWITCH_CHANNEL;
+    
+    adc_timer.Interval(8U); // completes 10ms cycle
+  }
 }
 
-// void select_adc_as_ch(adc_as_ch ch) {
-//   digitalWrite(AS_A2, mux_table[ch] )
-// }
+
+// set the multiplexer to the desired channel
+void select_adc_as_ch(adc_as_ch ch) {
+  const uint8_t idx = static_cast<uint8_t>(ch);
+  const uint8_t entry_count = sizeof(mux_table) / sizeof(mux_table[0]);
+
+  digitalWrite(AS_A2, mux_table[idx][0]);
+  digitalWrite(AS_A1, mux_table[idx][1]);
+  digitalWrite(AS_A0, mux_table[idx][2]);
+}
