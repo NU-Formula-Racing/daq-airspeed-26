@@ -81,8 +81,8 @@ void airspeed_init(void) {
   Serial.println("Airspeed Sensor ADC initialized");
 }
 
-u_int16_t read_airspeed_adc(void) {
-  u_int16_t data;
+uint16_t read_airspeed_adc(void) {
+  uint16_t data;
   digitalWrite(AS_SPI_CS, LOW); // LOW to enable
   data = SPI.transfer16(0x0000);
   digitalWrite(AS_SPI_CS, HIGH); // HIGH to disable
@@ -91,7 +91,7 @@ u_int16_t read_airspeed_adc(void) {
 
 float pressure_from_counts(uint16_t counts) { // do we care if the output is a float or uint12_t?
   float pressure = ((static_cast<float>(counts) - outputmin) * (pressuremax - pressuremin) / (outputmax - outputmin)) + pressuremin;
-  return float(pressure); // pressure (PSI)
+  return pressure; // pressure (PSI)
 }
 
 enum ADCState {
@@ -115,7 +115,6 @@ void adc_cycle(void) {
     adc_timer.Interval(60U); // completes 100ms cycle
   }
 }
-
 
 // set the multiplexer to the desired channel
 void select_adc_as_ch(adc_as_ch ch) {
