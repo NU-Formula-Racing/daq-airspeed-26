@@ -1,7 +1,8 @@
 #include <Arduino.h>
 #include <SPI.h>
 #include <virtualTimer.h>
-
+#include <airSpeed.h>
+// header file (declare functions) another file that calls function 
 #define AS_SPI_CS 5      // Airspeed ADC SPI Pins
 #define AS_SPI_MISO 18
 #define AS_SPI_SCLK 19
@@ -11,15 +12,23 @@
 
 // Multiplexer for the Airspeed ADC
 typedef enum {
-  ADC_AS_A1_B1,
-  ADC_AS_A2_B2,
-  ADC_AS_A3_B3,
-  ADC_AS_A4_B4,
-  ADC_AS_A5_B5,
-  ADC_AS_A6_B6,
+  ADC_AS_A1_B1 = 0,
+  ADC_AS_A2_B2 = 1,
+  ADC_AS_A3_B3 = 2,
+  ADC_AS_A4_B4 = 3,
+  ADC_AS_A5_B5 = 4,
+  ADC_AS_A6_B6 = 5,
 } adc_as_ch;
 
-static const uint8_t mux_table[][3] = {
+AirSpeed_Sensor_Pair A1_B1;
+AirSpeed_Sensor_Pair A2_B2;
+AirSpeed_Sensor_Pair A3_B3;
+AirSpeed_Sensor_Pair A4_B4;
+AirSpeed_Sensor_Pair A5_B5;
+AirSpeed_Sensor_Pair A6_B6;
+
+
+static const uint8_t mux_table[6][3] = {
   /*A2 A1 A0*/
   {0, 0, 0}, // ADC_AS_A1_B1
   {0, 0, 1}, // ADC_AS_A2_B2
@@ -81,23 +90,12 @@ void airspeed_init(void) {
   Serial.println("Airspeed Sensor ADC initialized");
 }
 
-uint16_t read_airspeed_adc(void) {
-  uint16_t data;
-  digitalWrite(AS_SPI_CS, LOW); // LOW to enable
-  data = SPI.transfer16(0x0000);
-  digitalWrite(AS_SPI_CS, HIGH); // HIGH to disable
-  return data;
-}
-
-float pressure_from_counts(uint16_t counts) { // do we care if the output is a float or uint12_t?
-  float pressure = ((static_cast<float>(counts) - outputmin) * (pressuremax - pressuremin) / (outputmax - outputmin)) + pressuremin;
-  return pressure; // pressure (PSI)
-}
-
 enum ADCState {
   STATE_SWITCH_CHANNEL,
   STATE_READ_ADC
 };
+
+volatile uint16_t adc_readings[6] = {0};
 
 void adc_cycle(void) {
   if (adc_state == STATE_SWITCH_CHANNEL) {
