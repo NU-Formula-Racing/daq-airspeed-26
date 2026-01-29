@@ -2,6 +2,9 @@
 #include <SPI.h>
 #include <virtualTimer.h>
 #include <airSpeed.h>
+#include <FS.h>
+#include <LittleFS.h>
+#include <SD.h>
 // header file (declare functions) another file that calls function 
 #define AS_SPI_CS 5      // Airspeed ADC SPI Pins
 #define AS_SPI_MISO 18
@@ -10,6 +13,7 @@
 #define AS_A0 4         // Airspeed ADC Multiplexer Pins
 #define AS_A1 16
 #define AS_A2 17
+#define SD_CS 13 // Replace with whatever is correct
 
 // MUX Object declaration
 AirSpeed_Sensor_Pair A1_B1(0, 0, 0); // ADC_AS_A1_B1
@@ -20,13 +24,22 @@ AirSpeed_Sensor_Pair A5_B5(1, 0, 0); // ADC_AS_A5_B5
 AirSpeed_Sensor_Pair A6_B6(1, 0, 1); // ADC_AS_A6_B6
 
 
+AirSpeed_Sensor_Pair airSpeedArray[6] = {A1_B1, A2_B2, A3_B3, A4_B4, A5_B5, A6_B6};
+
+File lfs_file;  // LittleFS; internal ESP flash storage
+File sd_file;   // SD: SD Card storage file
+
 volatile uint8_t mux_state = 0; 
 volatile uint8_t adc_state[6] = {0};
 
 
-void adc_cycle(void);
+void sensorCallback(void);
+void flushCallback(void);
+void airspeed_init(void);
 // cycles multiplexer every 10ms
-VirtualTimer adc_cycle_timer(100U, adc_cycle, VirtualTimer::Type::kRepeating);
+VirtualTimer sensor_time(100U, sensorCallback, VirtualTimer::Type::kRepeating); // 100ms to LittleFS
+VirtualTimer flush_time(5000U, flushCallback, VirtualTimer::Type::kRepeating);
+
 
 
 void setup() {
@@ -35,15 +48,82 @@ void setup() {
     delay(10);
   }
   airspeed_init();
-  adc_cycle_timer.Start(millis());
+  sensor_time.Start(millis());
+  flush_time.Start(millis());
+
+  lfs_file = LittleFS.open("/airspeed.csv", FILE_APPEND); // attempts to open file
+  if (!lfs_file) { // if file doesn't exist, create it
+    lfs_file = LittleFS.open("/airspeed.csv", FILE_WRITE);
+    if (lfs_file) {
+      lfs_file.println("timestamp_ms,A1_B1,A2_B2,A3_B3,A4_B4,A5_B5,A6_B6");  // Custom headers
+      lfs_file.close();
+      lfs_file = LittleFS.open("/airspeed.csv", FILE_APPEND); // reopens in FILE_APPEND mode
+    }
+  }
 }
 
 void loop() {
-  adc_cycle_timer.Tick(millis());
-  uint16_t as_data = read_airspeed_adc(); // read the data from the Airspeed ADC
-
-  float pressure = pressure_from_counts(as_data); // convert counts to pressure
+  sensor_time.Tick(millis());
+  flush_time.Tick(millis());
   delay(1000);
+}
+
+void sensorCallback(void) { // read sensors and write to LittleFS
+  uint32_t ts = millis();
+  String row; // CSV takes in Strings
+  row.reserve(64); // pre-allocate memory
+  row += String(ts); // Time Sting for each iteration of 6 sensor readings
+  for (int i = 0; i < 6; i++) {
+    float psi = airSpeedArray[i].update_reading(); // defined in airSpeed.cpp
+    row += ",";
+    row += String(psi, 3); // 3 decimal places
+  }
+  row += "\n";
+
+  if (lfs_file) { // if file is open
+    lfs_file.print(row); // writes row to LittleFS file
+    lfs_file.flush();  // Commit every N? Or in flushCallback
+  }
+}
+
+void flushCallback(void) {
+  if (!lfs_file) return; // if file doesn't exist
+
+  lfs_file.flush();  // Commit all pending writes
+
+  // Copy LittleFS to SD (APPEND if exists, create if not)
+  if (SD.begin(SD_CS)) {
+    sd_file = SD.open("/airspeed.csv", FILE_APPEND);
+    if (sd_file) {
+      File lfs_read = LittleFS.open("/airspeed.csv", FILE_READ);
+      if (lfs_read) {
+        size_t copied = 0;
+        uint8_t buffer[256]; // chunked data buffer (pulls this amount to perform read/write transfer)
+        // Copy LittleFS file to SD in chunks to avoid large allocations
+        while (lfs_read.available()) {
+          size_t read_len = lfs_read.read(buffer, sizeof(buffer)); // read 256-byte chunk
+          if (!read_len) {
+            break; // Unexpected EOF
+          }
+          copied += sd_file.write(buffer, read_len); // write chunk to SD
+        }
+        // The logic behind byte copying is that the same ASCII characters should be transfered if the same bytes are copied
+        sd_file.flush();
+        sd_file.close();
+        lfs_read.close();
+      }
+    }
+  }
+
+  // Clear LittleFS for fresh start
+  lfs_file.close();
+  LittleFS.remove("/airspeed.csv");  // Delete entire file
+  lfs_file = LittleFS.open("/airspeed.csv", FILE_WRITE);  // Recreate empty
+  if (lfs_file) {
+    lfs_file.println("timestamp_ms,A1_B1,A2_B2,A3_B3,A4_B4,A5_B5,A6_B6");  // New header
+    lfs_file.close();
+    lfs_file = LittleFS.open("/airspeed.csv", FILE_APPEND);  // Reopen append
+  }
 }
 
 // put function definitions here:
@@ -63,29 +143,5 @@ void airspeed_init(void) {
   pinMode(AS_A2, OUTPUT); // A2
 
   Serial.println("Airspeed Sensor ADC initialized");
-}
-
-enum ADCState {
-  STATE_SWITCH_CHANNEL,
-  STATE_READ_ADC
-};
-
-volatile uint16_t adc_readings[6] = {0};
-
-void adc_cycle(void) {
-  if (adc_state == STATE_SWITCH_CHANNEL) {
-    select_adc_as_ch(static_cast<adc_as_ch>(mux_state)); // switch to next MUX state
-    mux_state = (mux_state + 1) % 6; // make 6 as a define var
-    adc_state = STATE_READ_ADC;
-    
-    adc_timer.Interval(40U); // 40ms settle time
-  } 
-  else if (adc_state == STATE_READ_ADC) {
-    uint8_t channel = (mux_state == 0) ? 5 : (mux_state - 1); // reads ADC
-    adc_readings[channel] = read_airspeed_adc();
-    adc_state = STATE_SWITCH_CHANNEL;
-    
-    adc_timer.Interval(60U); // completes 100ms cycle
-  }
 }
 

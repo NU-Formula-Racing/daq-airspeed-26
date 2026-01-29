@@ -31,6 +31,7 @@ class AirSpeed_Sensor_Pair {
         uint16_t read_airSpeed_adc();
         float pressure_from_counts(uint16_t counts);
         void mux_set_writepins();
+        float update_reading();
 };
 
 

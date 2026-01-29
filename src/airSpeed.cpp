@@ -23,3 +23,10 @@ void AirSpeed_Sensor_Pair::mux_set_writepins(){
     digitalWrite(static_cast<uint8_t>(AirSpeedPins::AS_A2), A2_);
 }
 
+// redundant function to get sensor reading
+float AirSpeed_Sensor_Pair::update_reading(){
+    mux_set_writepins();
+    uint16_t counts = read_airSpeed_adc();
+    float pressure = pressure_from_counts(counts);
+    return pressure;
+}
