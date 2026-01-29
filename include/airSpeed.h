@@ -6,15 +6,16 @@
 
 enum class AirSpeedPins : uint16_t {
     AS_SPI_CS = 5,      // Airspeed ADC SPI Pins
-    AS_SPI_MISO = 18,
-    AS_SPI_SCLK = 19,
+    AS_A0 = 4,
+    AS_A1 = 16,
+    AS_A2 = 17,
 };
 
 namespace AirSpeedConstants {
-    const float PRESSURE_MIN = 0.0;    // min pressure (PSI)
-    const float PRESSURE_MAX = 25.0;   // max pressure (PSI)
-    const float OUTPUT_MIN = 1638.0;   // min output (counts)
-    const float OUTPUT_MAX = 14745.0;  // max output (counts)
+    const float PRESSURE_MIN = -1.0;    // min pressure (PSI)
+    const float PRESSURE_MAX = 1.0;   // max pressure (PSI)
+    const float OUTPUT_MIN = 0.1*4095;   // min output (counts)
+    const float OUTPUT_MAX = 0.9*4095;  // max output (counts)
 };
 
 // uint16_t number = static_cast<uint16_t>(AirSpeedPins::AS_SPI_CS);
@@ -23,12 +24,13 @@ namespace AirSpeedConstants {
 
 class AirSpeed_Sensor_Pair {
     public: 
-        AirSpeed_Sensor_Pair(int adc_pin_num) : adc_pin_num_(adc_pin_num) {};
-        void init();
+        AirSpeed_Sensor_Pair(int A0, int A1, int A2) : A0_(A0), A1_(A1), A2_(A2)  {};
+        const int A0_;
+        const int A1_;
+        const int A2_;
         uint16_t read_airSpeed_adc();
         float pressure_from_counts(uint16_t counts);
-        const int adc_pin_num_;  // Specific ADC pin number for this instance
-        
+        void mux_set_writepins();
 };
 
 
