@@ -20,12 +20,12 @@ typedef enum {
   ADC_AS_A6_B6 = 5,
 } adc_as_ch;
 
-AirSpeed_Sensor_Pair A1_B1;
-AirSpeed_Sensor_Pair A2_B2;
-AirSpeed_Sensor_Pair A3_B3;
-AirSpeed_Sensor_Pair A4_B4;
-AirSpeed_Sensor_Pair A5_B5;
-AirSpeed_Sensor_Pair A6_B6;
+AirSpeed_Sensor_Pair A1_B1(1);
+AirSpeed_Sensor_Pair A2_B2(1);
+AirSpeed_Sensor_Pair A3_B3(1);
+AirSpeed_Sensor_Pair A4_B4(1);
+AirSpeed_Sensor_Pair A5_B5(1);
+AirSpeed_Sensor_Pair A6_B6(1);
 
 
 static const uint8_t mux_table[6][3] = {
@@ -100,7 +100,7 @@ volatile uint16_t adc_readings[6] = {0};
 void adc_cycle(void) {
   if (adc_state == STATE_SWITCH_CHANNEL) {
     select_adc_as_ch(static_cast<adc_as_ch>(mux_state)); // switch to next MUX state
-    mux_state = (mux_state + 1) % 6;
+    mux_state = (mux_state + 1) % 6; // make 6 as a define var
     adc_state = STATE_READ_ADC;
     
     adc_timer.Interval(40U); // 40ms settle time
