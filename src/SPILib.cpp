@@ -1,0 +1,1 @@
+// Clock HIGH, wait 50ns, CLOCK LOW, read data, repeat. Each 
