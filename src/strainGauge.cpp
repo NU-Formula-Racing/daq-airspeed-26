@@ -9,10 +9,10 @@ void Strain_Gauge::init(){
 
 uint16_t Strain_Gauge::read_StrainGauge_data() {
     uint16_t data;
-    SPI.beginTransaction(SPISettings(2000000, MSBFIRST, SPI_MODE3));
-    digitalWrite(static_cast<uint8_t>(AirSpeedPins::AS_SPI_CS), LOW);  // LOW to enable
+    SPI.beginTransaction(SPISettings(2000000, MSBFIRST, SPI_MODE1));
+    digitalWrite(static_cast<uint8_t>(StrainGaugePins::SG_ADC_CLK), LOW);  // LOW to enable
     data = SPI.transfer16(0x0000);
-    digitalWrite(static_cast<uint8_t>(AirSpeedPins::AS_SPI_CS), HIGH);  // HIGH to disable
+    digitalWrite(static_cast<uint8_t>(StrainGaugePins::SG_ADC_CLK), HIGH);  // HIGH to disable
     SPI.endTransaction();
     return data;
 }
