@@ -24,14 +24,18 @@ namespace AirSpeedConstants {
 
 class AirSpeed_Sensor_Pair {
     public: 
+        struct DualADCCounts {
+            uint16_t adc_a_counts;
+            uint16_t adc_b_counts;
+        };
         AirSpeed_Sensor_Pair(int A0, int A1, int A2) : A0_(A0), A1_(A1), A2_(A2)  {};
         const int A0_;
         const int A1_;
         const int A2_;
-        uint16_t read_airSpeed_adc();
+        DualADCCounts read_airSpeed_adc_pair();
         float pressure_from_counts(uint16_t counts);
         void mux_set_writepins();
-        float update_reading();
+        float update_reading(); // Legacy helper: returns ADC A pressure.
 };
 
 

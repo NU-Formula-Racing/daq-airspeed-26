@@ -2,14 +2,34 @@
 #include <SPI.h>
 #include <airSpeed.h>
 
-uint16_t AirSpeed_Sensor_Pair::read_airSpeed_adc() {
-    uint16_t data;
-    SPI.beginTransaction(SPISettings(2000000, MSBFIRST, SPI_MODE3));
+namespace {
+const SPISettings kAirspeedSPISettings(1000000, MSBFIRST, SPI_MODE0);
+const uint16_t kMuxSettleTimeUs = 10;
+const uint16_t kChipSelectSetupUs = 2;
+}
+
+AirSpeed_Sensor_Pair::DualADCCounts AirSpeed_Sensor_Pair::read_airSpeed_adc_pair() {
+    uint8_t msb = 0;
+    uint8_t mid = 0;
+    uint8_t lsb = 0;
+    uint32_t raw24 = 0;
+    SPI.beginTransaction(kAirspeedSPISettings);
     digitalWrite(static_cast<uint8_t>(AirSpeedPins::AS_SPI_CS), LOW);  // LOW to enable
-    data = SPI.transfer16(0x0000);
+    delayMicroseconds(kChipSelectSetupUs);
+    msb = SPI.transfer(0x00);
+    mid = SPI.transfer(0x00);
+    lsb = SPI.transfer(0x00);
     digitalWrite(static_cast<uint8_t>(AirSpeedPins::AS_SPI_CS), HIGH);  // HIGH to disable
     SPI.endTransaction();
-    return data;
+
+    raw24 = (static_cast<uint32_t>(msb) << 16) |
+            (static_cast<uint32_t>(mid) << 8) |
+            static_cast<uint32_t>(lsb);
+
+    DualADCCounts counts{};
+    counts.adc_a_counts = static_cast<uint16_t>((raw24 >> 12) & 0x0FFFU);
+    counts.adc_b_counts = static_cast<uint16_t>(raw24 & 0x0FFFU);
+    return counts;
 }
 
 float AirSpeed_Sensor_Pair::pressure_from_counts(uint16_t counts) {
@@ -26,7 +46,8 @@ void AirSpeed_Sensor_Pair::mux_set_writepins(){
 // redundant function to get sensor reading
 float AirSpeed_Sensor_Pair::update_reading(){
     mux_set_writepins();
-    uint16_t counts = read_airSpeed_adc();
-    float pressure = pressure_from_counts(counts);
+    delayMicroseconds(kMuxSettleTimeUs);
+    const DualADCCounts counts = read_airSpeed_adc_pair();
+    float pressure = pressure_from_counts(counts.adc_a_counts);
     return pressure;
 }
