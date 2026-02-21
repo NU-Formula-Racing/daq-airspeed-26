@@ -5,30 +5,27 @@
 namespace {
 const SPISettings kAirspeedSPISettings(1000000, MSBFIRST, SPI_MODE0);
 const uint16_t kMuxSettleTimeUs = 10;
-const uint16_t kChipSelectSetupUs = 2;
+const uint16_t kChipSelectSetupUs = 5;
 }
 
 AirSpeed_Sensor_Pair::DualADCCounts AirSpeed_Sensor_Pair::read_airSpeed_adc_pair() {
-    uint8_t msb = 0;
-    uint8_t mid = 0;
-    uint8_t lsb = 0;
-    uint32_t raw24 = 0;
+    uint16_t frame0 = 0;
+    uint16_t frame1 = 0;
+
     SPI.beginTransaction(kAirspeedSPISettings);
     digitalWrite(static_cast<uint8_t>(AirSpeedPins::AS_SPI_CS), LOW);  // LOW to enable
     delayMicroseconds(kChipSelectSetupUs);
-    msb = SPI.transfer(0x00);
-    mid = SPI.transfer(0x00);
-    lsb = SPI.transfer(0x00);
+    frame0 = SPI.transfer16(0x0000);  // First 16 clocks
+    frame1 = SPI.transfer16(0x0000);  // Second 16 clocks
     digitalWrite(static_cast<uint8_t>(AirSpeedPins::AS_SPI_CS), HIGH);  // HIGH to disable
     SPI.endTransaction();
 
-    raw24 = (static_cast<uint32_t>(msb) << 16) |
-            (static_cast<uint32_t>(mid) << 8) |
-            static_cast<uint32_t>(lsb);
-
     DualADCCounts counts{};
-    counts.adc_a_counts = static_cast<uint16_t>((raw24 >> 12) & 0x0FFFU);
-    counts.adc_b_counts = static_cast<uint16_t>(raw24 & 0x0FFFU);
+    // Each 16-clock frame is 00 + 12-bit data + 00.
+    counts.adc_a_counts = static_cast<uint16_t>((frame0 >> 2) & 0x0FFFU);
+    counts.adc_b_counts = static_cast<uint16_t>((frame1 >> 2) & 0x0FFFU);
+    counts.raw_frame0 = frame0;
+    counts.raw_frame1 = frame1;
     return counts;
 }
 

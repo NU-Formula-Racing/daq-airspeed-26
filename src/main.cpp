@@ -20,11 +20,13 @@ AirSpeed_Sensor_Pair A5_B5(0, 0, 1); // A2A1A0 = 100
 AirSpeed_Sensor_Pair A6_B6(1, 0, 1); // A2A1A0 = 101
 
 AirSpeed_Sensor_Pair airSpeedArray[6] = {A1_B1, A2_B2, A3_B3, A4_B4, A5_B5, A6_B6};
-const uint32_t AIRSPEED_PRINT_PERIOD_MS = 250U;
+const uint8_t AIRSPEED_PAIR_COUNT = sizeof(airSpeedArray) / sizeof(airSpeedArray[0]);
+const uint32_t AIRSPEED_PRINT_PERIOD_MS = 1000U;
 uint32_t last_print_ms = 0U;
 
 void airspeed_init(void);
 void print_airspeed_values(void);
+void print_hex16(uint16_t value);
 
 void setup() {
   Serial.begin(9600);
@@ -34,8 +36,13 @@ void setup() {
 
   airspeed_init();
 
-  // Basic CSV output: one row per polling cycle.
-  Serial.println("time_ms,B1_counts,B1_psi,B2_counts,B2_psi,B3_counts,B3_psi,B4_counts,B4_psi,B5_counts,B5_psi,B6_counts,B6_psi");
+  Serial.println("time_ms,"
+                 "P1_B_counts,P1_B_psi,P1_A_counts,P1_A_psi,P1_raw0_hex,P1_raw1_hex,"
+                 "P2_B_counts,P2_B_psi,P2_A_counts,P2_A_psi,P2_raw0_hex,P2_raw1_hex,"
+                 "P3_B_counts,P3_B_psi,P3_A_counts,P3_A_psi,P3_raw0_hex,P3_raw1_hex,"
+                 "P4_B_counts,P4_B_psi,P4_A_counts,P4_A_psi,P4_raw0_hex,P4_raw1_hex,"
+                 "P5_B_counts,P5_B_psi,P5_A_counts,P5_A_psi,P5_raw0_hex,P5_raw1_hex,"
+                 "P6_B_counts,P6_B_psi,P6_A_counts,P6_A_psi,P6_raw0_hex,P6_raw1_hex");
 }
 
 void loop() {
@@ -65,21 +72,37 @@ void airspeed_init(void) {
   Serial.println("Airspeed Sensor ADC initialized");
 }
 
+void print_hex16(uint16_t value) {
+  if (value < 0x1000U) Serial.print("0");
+  if (value < 0x0100U) Serial.print("0");
+  if (value < 0x0010U) Serial.print("0");
+  Serial.print(value, HEX);
+}
+
 void print_airspeed_values(void) {
   Serial.print(millis());
 
-  for (int i = 0; i < 6; i++) {
+  for (uint8_t i = 0; i < AIRSPEED_PAIR_COUNT; i++) {
     AirSpeed_Sensor_Pair& sensor = airSpeedArray[i];
     sensor.mux_set_writepins();
-    delayMicroseconds(5);
+    delayMicroseconds(10);
 
-    const AirSpeed_Sensor_Pair::DualADCCounts counts = sensor.read_airSpeed_adc_pair();
-    const float psi_b = sensor.pressure_from_counts(counts.adc_b_counts);
+    AirSpeed_Sensor_Pair::DualADCCounts counts = sensor.read_airSpeed_adc_pair();
+    float psi_b = sensor.pressure_from_counts(counts.adc_b_counts);
+    float psi_a = sensor.pressure_from_counts(counts.adc_a_counts);
 
     Serial.print(",");
     Serial.print(counts.adc_b_counts);
     Serial.print(",");
     Serial.print(psi_b, 4);
+    Serial.print(",");
+    Serial.print(counts.adc_a_counts);
+    Serial.print(",");
+    Serial.print(psi_a, 4);
+    Serial.print(",0x");
+    print_hex16(counts.raw_frame0);
+    Serial.print(",0x");
+    print_hex16(counts.raw_frame1);
   }
 
   Serial.println();

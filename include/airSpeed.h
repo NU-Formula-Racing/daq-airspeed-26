@@ -27,6 +27,8 @@ class AirSpeed_Sensor_Pair {
         struct DualADCCounts {
             uint16_t adc_a_counts;
             uint16_t adc_b_counts;
+            uint16_t raw_frame0;
+            uint16_t raw_frame1;
         };
         AirSpeed_Sensor_Pair(int A0, int A1, int A2) : A0_(A0), A1_(A1), A2_(A2)  {};
         const int A0_;
