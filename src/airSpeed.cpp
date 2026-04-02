@@ -1,50 +1,76 @@
-// #include <Arduino.h>
-// #include <SPI.h>
-// #include <airSpeed.h>
+#include "airSpeed.h"
 
-// namespace {
-// const SPISettings kAirspeedSPISettings(1000000, MSBFIRST, SPI_MODE0);
-// const uint16_t kMuxSettleTimeUs = 10;
-// const uint16_t kChipSelectSetupUs = 5;
-// // 
+// Measurement request command
+static const uint8_t kMeasCmd[3] = {0xAA, 0x00, 0x00};
 
-// AirSpeed_Sensor_Pair::DualADCCounts AirSpeed_Sensor_Pair::read_airSpeed_adc_pair() {
-//     uint16_t frame0 = 0;
-//     uint16_t frame1 = 0;
+AirSpeedSensor::AirSpeedSensor(TCA9548A &mux, uint8_t channel, TwoWire &wire)
+    : _mux(mux), _channel(channel), _wire(wire) {}
 
-//     SPI.beginTransaction(kAirspeedSPISettings);
-//     digitalWrite(static_cast<uint8_t>(AirSpeedPins::AS_SPI_CS), LOW);  // LOW to enable
-//     // delayMicroseconds(kChipSelectSetupUs);
-//     frame0 = SPI.transfer16(0x0000);  // First 16 clocks
-//     frame1 = SPI.transfer16(0x0000);  // Second 16 clocks
-//     digitalWrite(static_cast<uint8_t>(AirSpeedPins::AS_SPI_CS), HIGH);  // HIGH to disable
-//     SPI.endTransaction();
+bool AirSpeedSensor::begin() {
+    _mux.selectChannel(_channel);
+    _wire.beginTransmission(ABP2::I2C_ADDR);
+    bool VERIFY = (_wire.endTransmission() == 0);
+    _mux.deselectAll();
+    return VERIFY;
+}
 
-//     DualADCCounts counts{};
-//     // Each 16-clock frame is 00 + 12-bit data + 00.
-//     counts.adc_a_counts = static_cast<uint16_t>((frame0 >> 2) & 0x0FFFU);
-//     counts.adc_b_counts = static_cast<uint16_t>((frame1 >> 2) & 0x0FFFU);
-//     counts.raw_frame0 = frame0;
-//     counts.raw_frame1 = frame1;
-//     return counts;
-// }
+ABP2Reading AirSpeedSensor::read() {
+    ABP2Reading result{0.0f, 0.0f, 0, false};
 
-// float AirSpeed_Sensor_Pair::pressure_from_counts(uint16_t counts) {
-//     float pressure = ((static_cast<float>(counts) - AirSpeedConstants::OUTPUT_MIN) * (AirSpeedConstants::PRESSURE_MAX - AirSpeedConstants::PRESSURE_MIN) / (AirSpeedConstants::OUTPUT_MAX - AirSpeedConstants::OUTPUT_MIN)) + AirSpeedConstants::PRESSURE_MIN;
-//     return pressure;  // pressure (PSI)
-// }
+    _mux.selectChannel(_channel);
 
-// void AirSpeed_Sensor_Pair::mux_set_writepins(){
-//     digitalWrite(static_cast<uint8_t>(AirSpeedPins::AS_A0), A0_);
-//     digitalWrite(static_cast<uint8_t>(AirSpeedPins::AS_A1), A1_);
-//     digitalWrite(static_cast<uint8_t>(AirSpeedPins::AS_A2), A2_);
-// }
+    // 1. Send measurement request
+    _wire.beginTransmission(ABP2::I2C_ADDR);
+    _wire.write(kMeasCmd, 3);
+    if (_wire.endTransmission() != 0) {
+        _mux.deselectAll();
+        return result;  // I2C error
+    }
 
-// // redundant function to get sensor reading
-// float AirSpeed_Sensor_Pair::update_reading(){
-//     mux_set_writepins();
-//     delayMicroseconds(kMuxSettleTimeUs);
-//     const DualADCCounts counts = read_airSpeed_adc_pair();
-//     float pressure = pressure_from_counts(counts.adc_a_counts);
-//     return pressure;
-// }
+    // 2. Poll busy bit until ready or timeout
+    uint32_t deadline = millis() + ABP2::BUSY_TIMEOUT_MS;
+    uint8_t status = 0;
+    while (millis() < deadline) {
+        if (_wire.requestFrom(ABP2::I2C_ADDR, (uint8_t)1) == 1) {
+            status = _wire.read();
+            if (!(status & (1 << ABP2::STATUS_BIT_BUSY))) break;
+        }
+        delay(1);
+    }
+
+    // 3. Read all 7 bytes: [status][P2][P1][P0][T2][T1][T0]
+    if (_wire.requestFrom(ABP2::I2C_ADDR, (uint8_t)7) != 7) { // checks byte size of request
+        _mux.deselectAll();
+        return result;  // I2C error
+    }
+
+    uint8_t raw[7];
+    for (uint8_t i = 0; i < 7; i++) raw[i] = _wire.read();
+
+    _mux.deselectAll();
+
+    result.status = raw[0];
+
+    // Fault check: error or math saturation bits set
+    if ((result.status & (1 << ABP2::STATUS_BIT_ERROR)) || (result.status & (1 << ABP2::STATUS_BIT_MATH))) {
+        return result;
+    }
+
+    // shifts data to form digital signal (from datasheet)
+    uint32_t p_counts = ((uint32_t)raw[1] << 16) | ((uint32_t)raw[2] <<  8) | (uint32_t)raw[3];
+
+    uint32_t t_counts = ((uint32_t)raw[4] << 16) | ((uint32_t)raw[5] <<  8) | (uint32_t)raw[6];
+
+    result.pressure_inH2O = _pressure_from_counts(p_counts);
+    result.temperature_C  = _temperature_from_counts(t_counts);
+    result.valid = true;
+    return result;
+}
+
+float AirSpeedSensor::_pressure_from_counts(uint32_t counts) {
+    return ((float)(counts - ABP2::OUT_MIN) / (float)(ABP2::OUT_MAX - ABP2::OUT_MIN)) * (ABP2::PMAX - ABP2::PMIN) + ABP2::PMIN;
+}
+
+float AirSpeedSensor::_temperature_from_counts(uint32_t counts) {
+    return ((float)counts * 200.0f / (float)ABP2::TEMP_MAX) - 50.0f;
+}
