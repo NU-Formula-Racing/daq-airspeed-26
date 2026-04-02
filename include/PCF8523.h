@@ -54,6 +54,6 @@ public:
 private:
     TwoWire &_wire;
 
-    static uint8_t _bcd2bin(uint8_t bcd);
-    static uint8_t _bin2bcd(uint8_t bin);
+    static uint8_t _bcd2bin(uint8_t bcd); // binary-coded decimal to binary
+    static uint8_t _bin2bcd(uint8_t bin); // binary to bcd
 };
