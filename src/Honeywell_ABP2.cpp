@@ -14,13 +14,26 @@ Honeywell_ABP2::Honeywell_ABP2() {
   _status = 0;
 }
 
+/**
+ * @brief Setups the HW by sending a dummy measurement request to wake up the sensor.
+ */
 bool Honeywell_ABP2::begin(uint8_t addr, TwoWire *theWire) {
   _addr = addr;
   _wire = theWire;
   
-  // Check if device is alive on the I2C bus
+  // WAKE UP THE SENSOR: Send an initial measurement command sequence.
+  // This awakens the internal ASIC state machine from deep sleep mode.
   _wire->beginTransmission(_addr);
-  return (_wire->endTransmission() == 0);
+  _wire->write(0xAA); 
+  _wire->write(0x00); 
+  _wire->write(0x00); 
+  
+  // If the sensor is physically wired and powered correctly, it will ACK this command block.
+  if (_wire->endTransmission() == 0) {
+    delay(5); // Wait for the wake conversion to complete cleanly
+    return true;
+  }
+  return false;
 }
 
 bool Honeywell_ABP2::begin(TwoWire *theWire) {
@@ -32,7 +45,6 @@ bool Honeywell_ABP2::begin(TwoWire *theWire) {
  */
 bool Honeywell_ABP2::readSensor() {
   // Step 1: Send the Start Measurement Request Command 
-  // For standard ABP2 configurations, this sequence requests data formatting
   _wire->beginTransmission(_addr);
   _wire->write(0xAA); // Measurement Command byte
   _wire->write(0x00); // Parameter 1
@@ -42,11 +54,9 @@ bool Honeywell_ABP2::readSensor() {
   }
   
   // Step 2: Wait for Conversion to finish
-  // The ABP2 requires up to ~2.5 - 5ms depending on internal ASIC settings
   delay(5); 
   
   // Step 3: Request the complete 7-byte output block 
-  // [1 Status Byte] [3 Pressure Bytes] [3 Temperature Bytes]
   uint8_t bytesReceived = _wire->requestFrom(_addr, (uint8_t)7);
   if (bytesReceived < 7) {
     return false; // Missing data bytes
@@ -74,22 +84,15 @@ bool Honeywell_ABP2::readSensor() {
  * @brief Converts raw counts to standard physical scale values.
  */
 void Honeywell_ABP2::calculatePhysicalValues() {
-  // NOTE: Honeywell Transfer function formulas vary slightly depending on whether
-  // your sensor specifies a 10% to 90% calibration or a 30% to 70% calibration scale.
-  // Standard digital variants typically use a 10% to 90% output range allocation:
-  
   float outMin = 1677722.0;  // 10% of 2^24 digital counts
   float outMax = 15099494.0; // 90% of 2^24 digital counts
   
-  // Replace these with your exact sensor's pressure limits (e.g., 0 to 4 bar or 0 to 60 psi)
+  // TODO: Check your exact sensor part number and adjust these calibration boundaries!
+  // e.g., if you have a 0 to 4 bar sensor, set pMax = 4.0
   float pMin = 0.0;  
   float pMax = 10.0; 
 
-  // Compute Compensation calculation for pressure
   _pressure = (((float)_rawPressure - outMin) * (pMax - pMin)) / (outMax - outMin) + pMin;
-  
-  // Calculate true compensated core junction temperature 
-  // Honeywell ABP2 formulas map raw temperature directly over -40 to 110 degrees C
   _temperature = (((float)_rawTemperature / 16777216.0) * 150.0) - 40.0;
 }
 
