@@ -1,158 +1,86 @@
-#include <Arduino.h>
 #include <Wire.h>
-#include <virtualTimer.h>
-#include "TCA9548A.h"
-#include "airSpeed.h"
-#include "PCF8523.h"
+#include "TCA9548A.h"       // Use your multiplexer driver architecture
+#include "Honeywell_ABP2.h" // Use the new ABP2 driver template
 
-// GPIO Definitions
-#define SDA_PIN 21
-#define SCL_PIN 22
+#define MUX1_ADDRESS 0x70   
+#define MUX2_ADDRESS 0x71   
 
-// SD card pins
-#define SD_MISO 27
-#define SD_CLK  14
-#define SD_MOSI 13
-#define SD_CS   15
+TCA9548A mux1;
+TCA9548A mux2;
 
-// Hardware stuff
-TCA9548A muxA(0x70);          // MUX A at address 0x70
-TCA9548A muxB(0x71);          // MUX B at address 0x71
-PCF8523_RTC rtc;
-
-// Airspeed sensors
-// MUX A channels 0-7, MUX B channels 0-3  (adjust to match your wiring)
-static constexpr uint8_t MUX_A_COUNT = 6;
-static constexpr uint8_t MUX_B_COUNT = 6;
-static constexpr uint8_t SENSOR_COUNT = MUX_A_COUNT + MUX_B_COUNT;
-
-AirSpeedSensor sensorsA[] = {
-    AirSpeedSensor(muxA, 0), AirSpeedSensor(muxA, 1),
-    AirSpeedSensor(muxA, 2), AirSpeedSensor(muxA, 3),
-    AirSpeedSensor(muxA, 4), AirSpeedSensor(muxA, 5),
-};
-
-AirSpeedSensor sensorsB[] = {
-    AirSpeedSensor(muxB, 0), AirSpeedSensor(muxB, 1),
-    AirSpeedSensor(muxB, 2), AirSpeedSensor(muxB, 3),
-    AirSpeedSensor(muxB, 4), AirSpeedSensor(muxB, 5),
-};
-
-// Readings storage
-ABP2Reading readings[SENSOR_COUNT];
-RTCTime currentTime;
-
-// Timer group
-VirtualTimerGroup timerGroup;
-
-// Forward declarations
-void pollSensors();
-void printData();
-
-// Callbacks
-void pollSensors() {
-    // Read RTC
-    currentTime = rtc.readTime();
-
-    // Read all MUX A sensors
-    for (uint8_t i = 0; i < MUX_A_COUNT; i++) {
-        readings[i] = sensorsA[i].read();
-    }
-
-    // Read all MUX B sensors
-    for (uint8_t i = 0; i < MUX_B_COUNT; i++) {
-        readings[MUX_A_COUNT + i] = sensorsB[i].read();
-    }
-}
-
-void printData() {
-    // Print RTC timestamp
-    if (currentTime.valid) {
-        char ts[24];
-        snprintf(ts, sizeof(ts), "20%02u-%02u-%02u %02u:%02u:%02u",
-                 currentTime.year, currentTime.month, currentTime.day,
-                 currentTime.hours, currentTime.minutes, currentTime.seconds);
-        Serial.print("[");
-        Serial.print(ts);
-        Serial.print("] ");
-        if (currentTime.os_flag) Serial.print("(RTC CLOCK LOST) ");
-    } else {
-        Serial.print("[RTC ERROR] ");
-    }
-
-    Serial.print("t=");
-    Serial.print(millis());
-    Serial.println("ms");
-
-    // Print each sensor reading
-    for (uint8_t i = 0; i < SENSOR_COUNT; i++) {
-        const char *muxLabel = (i < MUX_A_COUNT) ? "A" : "B";
-        uint8_t ch = (i < MUX_A_COUNT) ? i : (i - MUX_A_COUNT);
-
-        Serial.print("  MUX");
-        Serial.print(muxLabel);
-        Serial.print(":CH");
-        Serial.print(ch);
-
-        if (readings[i].valid) {
-            Serial.print("  P=");
-            Serial.print(readings[i].pressure_inH2O, 4);
-            Serial.print(" inH2O  T=");
-            Serial.print(readings[i].temperature_C, 1);
-            Serial.println(" C");
-        } else {
-            Serial.print("  INVALID (status=0x"); // error catching
-            Serial.print(readings[i].status, HEX);
-            Serial.println(")");
-        }
-    }
-    Serial.println("---");
-}
+// Arrays representing the actual Honeywell sensor items connected to each MUX board
+Honeywell_ABP2 sensorsMux1[6]; 
+Honeywell_ABP2 sensorsMux2[6]; 
 
 void setup() {
-    Serial.begin(9600);
-    Wire.begin(SDA_PIN, SCL_PIN);
+  Serial.begin(9600);
+  while(!Serial);
+  
+  Wire.begin();
+  delay(100);
 
-    Serial.println("DAQ Airspeed — Initializing...");
+  // 1. Initialize Multiplexer 1
+  if (!mux1.begin(MUX1_ADDRESS, &Wire)) {
+    Serial.println("CRITICAL ERROR: Multiplexer 1 (0x70) not responding!");
+    while(1); 
+  }
+  Serial.println("Multiplexer 1 (0x70) initialized successfully.");
 
-    // Init MUXes
-    if (muxA.begin()) Serial.println("ERROR: MUX A (0x70) not found!");
-    if (muxB.begin()) Serial.println("ERROR: MUX B (0x71) not found!");
+  delay(100); // <--- ADD THIS CRITICAL DELAY HERE to let the bus settle!
 
-    // Init RTC
-    if (!rtc.begin()) {
-        Serial.println("ERROR: PCF8523 RTC not found!");
-    } else {
-        Serial.println("PCF8523 RTC OK");
+  // 2. Initialize Multiplexer 2
+  if (!mux2.begin(MUX2_ADDRESS, &Wire)) {
+    Serial.println("CRITICAL ERROR: Multiplexer 2 (0x71) not responding!");
+    while(1); 
+  }
+  Serial.println("Multiplexer 2 (0x71) initialized successfully.");
+  
+  delay(100);
+
+  // Initialize ABP2 devices under Multiplexer 1
+  for (uint8_t i = 0; i < 6; i++) {
+    mux1.selectChannel(i);
+    delay(5); 
+
+    if (!sensorsMux1[i].begin(ABP2_I2C_ADDR_DEFAULT, &Wire)) {
+      Serial.print("Sensor not found on MUX 1 [Ch "); Serial.print(i); Serial.println("]");
     }
+  }
 
-    // Init sensors — report which ones respond
-    Serial.print("Sensors on MUX A: ");
-    for (uint8_t i = 0; i < MUX_A_COUNT; i++) {
-        bool ok = sensorsA[i].begin();
-        Serial.print(ok ? "+" : "-");
+  // Initialize ABP2 devices under Multiplexer 2
+  for (uint8_t i = 0; i < 6; i++) {
+    mux2.selectChannel(i);
+    delay(5); 
+
+    if (!sensorsMux2[i].begin(ABP2_I2C_ADDR_DEFAULT, &Wire)) {
+      Serial.print("Sensor not found on MUX 2 [Ch "); Serial.print(i); Serial.println("]");
     }
-    Serial.println();
-
-    Serial.print("Sensors on MUX B: ");
-    for (uint8_t i = 0; i < MUX_B_COUNT; i++) {
-        bool ok = sensorsB[i].begin();
-        Serial.print(ok ? "+" : "-");
-    }
-    Serial.println();
-
-    // CSV-style header for serial
-    Serial.println();
-    Serial.println("timestamp,millis,mux,ch,pressure_inH2O,temp_C,status,valid");
-    Serial.println("========================================================");
-
-    // Schedule repeating timers
-    timerGroup.AddTimer(1000, pollSensors);   // poll sensors every 1s
-    timerGroup.AddTimer(1000, printData);     // print to serial every 1s
-
-    Serial.println("Timers started.");
+  }
 }
 
 void loop() {
-    timerGroup.Tick(millis());
+  // Read sensors from Multiplexer 1
+  for (uint8_t i = 0; i < 6; i++) {
+    mux1.selectChannel(i);
+    
+    if (sensorsMux1[i].readSensor()) {
+      Serial.print("MUX 1 [Ch "); Serial.print(i);
+      Serial.print("] Pressure: "); Serial.print(sensorsMux1[i].getPressure(), 4);
+      Serial.print(" | Temp: "); Serial.println(sensorsMux1[i].getTemperature(), 1);
+    }
+  }
+
+  // Read sensors from Multiplexer 2
+  for (uint8_t i = 0; i < 6; i++) {
+    mux2.selectChannel(i);
+    
+    if (sensorsMux2[i].readSensor()) {
+      Serial.print("MUX 2 [Ch "); Serial.print(i);
+      Serial.print("] Pressure: "); Serial.print(sensorsMux2[i].getPressure(), 4);
+      Serial.print(" | Temp: "); Serial.println(sensorsMux2[i].getTemperature(), 1);
+    }
+  }
+
+  Serial.println("==========================================");
+  delay(1000); 
 }
