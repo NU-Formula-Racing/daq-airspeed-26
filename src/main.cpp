@@ -116,8 +116,8 @@ void setup() {
     Serial.println("DAQ Airspeed — Initializing...");
 
     // Init MUXes
-    if (!muxA.begin()) Serial.println("ERROR: MUX A (0x70) not found!");
-    if (!muxB.begin()) Serial.println("ERROR: MUX B (0x71) not found!");
+    if (muxA.begin()) Serial.println("ERROR: MUX A (0x70) not found!");
+    if (muxB.begin()) Serial.println("ERROR: MUX B (0x71) not found!");
 
     // Init RTC
     if (!rtc.begin()) {
